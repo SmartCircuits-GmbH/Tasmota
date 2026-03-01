@@ -837,6 +837,10 @@ struct SML_GLOBS {
   uint8_t twai_installed;
 #endif // USE_SML_CANBUS
   uint8_t sml_options = SML_OPTIONS_JSON_ENABLE;
+#ifdef WATTWAECHTER_ESP32C6
+  uint8_t passthru2usb = 0;            // 0=off, 1-7=meter number for USB passthrough
+  uint8_t passthru_saved_loglevel = 0;  // saved seriallog_level before muting
+#endif
 } sml_globs;
 
 
@@ -2054,7 +2058,13 @@ void sml_shift_in(uint32_t meters, uint32_t shard) {
     // Read data into the temporary buffer
     struct SML_CRC_DATA *cp = mp->sml_crc_data;
     if (cp->crcbuff_pos < (mp->so_sml_crc & 0x0fff)) {
-        cp->crcbuff[cp->crcbuff_pos++] = mp->meter_ss->read();
+        uint8_t crc_byte = mp->meter_ss->read();
+#ifdef WATTWAECHTER_ESP32C6
+        if (sml_globs.passthru2usb && ((sml_globs.passthru2usb & 7) - 1 == (int)meters)) {
+          TasConsole.write(crc_byte);
+        }
+#endif
+        cp->crcbuff[cp->crcbuff_pos++] = crc_byte;
     } else {
         // Buffer overflow, reset and log an error
         cp->overflowcnt++;
@@ -2184,7 +2194,12 @@ void sml_shift_in(uint32_t meters, uint32_t shard) {
     
   uint8_t iob;
   if (mp->srcpin != TCP_MODE_FLG) {
-    iob = (uint8_t)mp->meter_ss->read(); 
+    iob = (uint8_t)mp->meter_ss->read();
+#ifdef WATTWAECHTER_ESP32C6
+    if (sml_globs.passthru2usb && ((sml_globs.passthru2usb & 7) - 1 == (int)meters)) {
+      TasConsole.write(iob);
+    }
+#endif
   } else {
     if (mp->client) {
       iob = (uint8_t)mp->client->read();
@@ -6011,6 +6026,26 @@ bool XSNS_53_cmd(void) {
         } else {
           ResponseTime_P(PSTR(",\"SML\":{\"EbusArb\":\"not attached\"}}"));
         }
+#endif
+#ifdef WATTWAECHTER_ESP32C6
+      } else if (*cp == 'p') {
+        // USB passthrough: forward raw SML bytes to TasConsole (USB CDC)
+        cp++;
+        if (isdigit(*cp)) {
+          uint8_t index = atoi(cp);
+          if (index > 0) {
+            if ((index & 7) > sml_globs.meters_used) index = 1;
+            sml_globs.passthru_saved_loglevel = TasmotaGlobal.seriallog_level;
+            sml_globs.passthru2usb = index;
+            TasmotaGlobal.seriallog_level = LOG_LEVEL_NONE;
+            TasmotaGlobal.seriallog_timer = 0;
+          } else {
+            sml_globs.passthru2usb = 0;
+            TasmotaGlobal.seriallog_level = sml_globs.passthru_saved_loglevel;
+            TasmotaGlobal.seriallog_timer = 0;
+          }
+        }
+        ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"passthru: %d\"}}"), sml_globs.passthru2usb);
 #endif
       } else {
         serviced = false;
