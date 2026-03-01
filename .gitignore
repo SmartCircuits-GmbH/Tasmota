@@ -59,6 +59,9 @@ lib/libesp32/berry/berry
 ## IntelliJ ######
 .idea
 
+## Claude Code ######
+.claude
+
 ## Python virtual environments for Platformio ##
 venv
 .venv
