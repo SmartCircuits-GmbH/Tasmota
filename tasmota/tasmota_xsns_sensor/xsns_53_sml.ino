@@ -2481,7 +2481,23 @@ uint32_t meters;
           if (!mp->meter_ss) continue;
           // poll for serial input
           if (sml_globs.ser_act_LED_pin != 255 && (sml_globs.ser_act_meter_num == 0 || sml_globs.ser_act_meter_num - 1 == meters)) {
+#ifdef WATTWAECHTER_ESP32C6
+            // WattWächter LED-Ring: PWM-Steuerung statt digitalWrite, inkl. Mirror-Pin
+            static bool ww_sml_led_state = false;
+            if (mp->meter_ss->available()) { ww_sml_led_state = !ww_sml_led_state; }
+            uint32_t ww_pwm_val = ww_sml_led_state ? 1023 : 0;
+            analogWrite(sml_globs.ser_act_LED_pin, ww_pwm_val);
+            // Mirror-Pin: LED1↔LED2 Paare (GPIO 2↔7, 5↔14, 4↔15)
+            int8_t ww_mirror = -1;
+            switch (sml_globs.ser_act_LED_pin) {
+              case 2: ww_mirror = 7; break;   case 7: ww_mirror = 2; break;
+              case 5: ww_mirror = 14; break;  case 14: ww_mirror = 5; break;
+              case 4: ww_mirror = 15; break;  case 15: ww_mirror = 4; break;
+            }
+            if (ww_mirror >= 0) { analogWrite(ww_mirror, ww_pwm_val); }
+#else
             digitalWrite(sml_globs.ser_act_LED_pin, mp->meter_ss->available() && !digitalRead(sml_globs.ser_act_LED_pin)); // Invert LED, if queue is continuously full
+#endif
           }
 #ifdef USE_SML_EBUS_ARB
           // arb meter: the onReceive RX-event task is the sole reader (it feeds ebus_feed_byte);
@@ -3541,7 +3557,10 @@ void SML_Show(boolean json) {
           tststr:
           if (*cp == '#') {
             // meter id
-            if (*(cp + 1) == 'x') {
+            if (*(cp + 1) == '#') {
+              // FNN server ID decode (DIN 43863-5)
+              sml_fnn_decode(mindex, tpowstr);
+            } else if (*(cp + 1) == 'x') {
               // convert hex to asci
               sml_hex_asci(mindex, tpowstr);
             } else {
@@ -3650,7 +3669,14 @@ void SML_Show(boolean json) {
                 } else {
                   WSContentSend_P(PSTR("{s}%s %s{m}"), sml_globs.mp[mindex].prefix, name);  // Do not replace decimal separator in label
                 }
-                WSContentSend_PD(PSTR("%s %s{e}"), tpowstr, unit); // Replace decimal separator in value
+                // strip JSON quotes from meter_id strings for web display
+                char *webval = tpowstr;
+                if (mid && *webval == '"') {
+                  webval++;
+                  char *end = strrchr(webval, '"');
+                  if (end) *end = 0;
+                }
+                WSContentSend_PD(PSTR("%s %s{e}"), webval, unit); // Replace decimal separator in value
               }
             }
           }
@@ -5481,6 +5507,37 @@ void sml_hex_asci(uint32_t mindex, char *tpowstr) {
   *tpowstr = 0;
 }
 
+// Decode FNN server ID (DIN 43863-5) from hex meter_id
+// Input hex:  "0a01454652190271f27b" (10 bytes: Flag + IAC + Manufacturer(3) + EquipCode + Serial(4))
+// Output:     "1EFR19 4102 2075"
+void sml_fnn_decode(uint32_t mindex, char *tpowstr) {
+  char *hex = meter_desc[mindex].meter_id;
+  uint16_t slen = strlen(hex);
+  // FNN format needs exactly 20 hex chars (10 data bytes)
+  if (slen < 20) {
+    // fallback to raw hex output
+    sprintf_P(tpowstr, PSTR("\"%s\""), hex);
+    return;
+  }
+  // convert hex pairs to bytes
+  uint8_t b[10];
+  for (uint8_t i = 0; i < 10; i++) {
+    b[i] = (sml_hexnibble(hex[i * 2]) << 4) | sml_hexnibble(hex[i * 2 + 1]);
+  }
+  // verify FNN format: byte 0 = 0x0a, bytes 2-4 = uppercase ASCII (manufacturer code)
+  if (b[0] == 0x0a && b[2] >= 'A' && b[2] <= 'Z' &&
+      b[3] >= 'A' && b[3] <= 'Z' && b[4] >= 'A' && b[4] <= 'Z') {
+    uint32_t serial = ((uint32_t)b[6] << 24) | ((uint32_t)b[7] << 16) |
+                      ((uint32_t)b[8] << 8) | b[9];
+    sprintf_P(tpowstr, PSTR("\"%u %c%c%c%02x %04u %04u\""),
+              b[1], b[2], b[3], b[4], b[5],
+              (uint16_t)(serial / 10000), (uint16_t)(serial % 10000));
+  } else {
+    // not FNN format, fallback to raw hex
+    sprintf_P(tpowstr, PSTR("\"%s\""), hex);
+  }
+}
+
 uint8_t sml_hexnibble(char chr) {
   uint8_t rVal = 0;
   if (isdigit(chr)) {
@@ -5929,6 +5986,9 @@ bool XSNS_53_cmd(void) {
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_LED_pin: %d\"}}"), sml_globs.ser_act_LED_pin);
         } else {
           sml_globs.ser_act_LED_pin = atoi(cp);
+#ifdef WATTWAECHTER_ESP32C6
+          // WattWächter: Pin ist als PWM belegt, Gpio_used-Check und pinMode überspringen
+#else
           if (Gpio_used(sml_globs.ser_act_LED_pin)) {
             AddLog(LOG_LEVEL_INFO, PSTR("SML: Error: Duplicate GPIO %d defined. Not usable for LED."), sml_globs.ser_act_LED_pin);
             sml_globs.ser_act_LED_pin = 255;
@@ -5936,6 +5996,7 @@ bool XSNS_53_cmd(void) {
           if (sml_globs.ser_act_LED_pin != 255) {
             pinMode(sml_globs.ser_act_LED_pin, OUTPUT);
           }
+#endif
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_LED_pin: %d\"}}"), sml_globs.ser_act_LED_pin);
         }
 #ifdef USE_SML_EBUS_ARB

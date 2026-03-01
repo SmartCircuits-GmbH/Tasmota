@@ -83,6 +83,15 @@ void PwmApplyGPIO(bool force_update_all) {
 
   // AddLog(LOG_LEVEL_INFO, "PWM: resol0=%i freq0=%i", timer0_resolution, timer0_freq);
 
+#ifdef WATTWAECHTER_ESP32C6
+  // WattWächter LED-Ring: PWM1-3 (LED1 R/G/B) auf PWM4-6 (LED2 R/G/B) spiegeln
+  for (uint32_t i = 0; i < 3; i++) {
+    if (TasmotaGlobal.pwm_value[i] >= 0) {
+      TasmotaGlobal.pwm_value[i + 3] = TasmotaGlobal.pwm_value[i];
+    }
+  }
+#endif
+
   for (uint32_t i = 0; i < MAX_PWMS; i++) {
 
     // compute `pwm_val`, the virtual value of PWM (not taking into account inverted)
