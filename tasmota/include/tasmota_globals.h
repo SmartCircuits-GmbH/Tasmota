@@ -74,6 +74,13 @@ String EthernetMacAddress(void);
  * Final overrides
 \*********************************************************************************************/
 
+#ifdef WATTWAECHTER_ESP32C6
+  // tasmota_configurations.h re-enables USE_LIGHT after user_config_override.h #undef'd it.
+  // WattWächter uses raw PWM (analogWrite) for LED rings, no light driver needed.
+  #undef USE_LIGHT
+  #undef USE_AC_ZERO_CROSS_DIMMER  // Depends on USE_LIGHT
+#endif
+
 const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_config_override.h
 
 /*-------------------------------------------------------------------------------------------*\
