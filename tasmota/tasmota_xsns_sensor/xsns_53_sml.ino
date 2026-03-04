@@ -6002,7 +6002,13 @@ bool XSNS_53_cmd(void) {
         } else {
           sml_globs.ser_act_LED_pin = atoi(cp);
 #ifdef WATTWAECHTER_ESP32C6
-          // WattWächter: Pin ist als PWM belegt, Gpio_used-Check und pinMode überspringen
+          // WattWächter: Clear all LED ring GPIOs before setting activity LED
+          {
+            const uint8_t led_gpios[] = {2, 5, 4, 7, 14, 15};
+            for (uint8_t i = 0; i < 6; i++) {
+              analogWrite(led_gpios[i], 0);
+            }
+          }
 #else
           if (Gpio_used(sml_globs.ser_act_LED_pin)) {
             AddLog(LOG_LEVEL_INFO, PSTR("SML: Error: Duplicate GPIO %d defined. Not usable for LED."), sml_globs.ser_act_LED_pin);
