@@ -184,7 +184,11 @@ const uint16_t SAFE_POWER_WINDOW = 30;      // Time in MINUTES to disable allow 
 const uint8_t MAX_POWER_RETRY = 5;          // Retry count allowing agreed power limit overflow
 
 const uint8_t STATES = 20;                  // Number of states per second using 50 mSec interval
+#ifdef WATTWAECHTER_ESP32C6
+const uint8_t IMMINENT_RESET_FACTOR = 2;    // 3.5s × 2 = 7s hold = factory reset
+#else
 const uint8_t IMMINENT_RESET_FACTOR = 10;   // Factor to extent button hold time for imminent Reset to default 40 seconds using KEY_HOLD_TIME of 40
+#endif
 const uint32_t BOOT_LOOP_TIME = 10;         // Number of seconds to stop detecting boot loops
 const uint32_t POWER_CYCLE_TIME = 8;        // Number of seconds to reset power cycle boot loops
 const uint16_t SYSLOG_TIMER = 600;          // Seconds to restore syslog_level
