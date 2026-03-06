@@ -132,6 +132,12 @@
 #undef USE_BERRY
 #undef USE_AUTOCONF
 
+// ---- Button-Timing ---------------------------------------------------------
+// 7s Halten = Factory-Reset, 5× Drücken = WiFi-Reset (AP-Modus)
+// HOLD-Event bei 3.5s (unsichtbar), Factory-Reset bei 3.5s × 2 = 7s
+#undef  KEY_HOLD_TIME
+#define KEY_HOLD_TIME          35                // 35 × 0.1s = 3.5s (HOLD-Event, keine sichtbare Wirkung)
+
 // ---- Aktive Features -------------------------------------------------------
 
 // KNX Support
@@ -211,9 +217,10 @@
   //   GPIO2=PWM1(LED1_R), GPIO5=PWM2(LED1_G), GPIO4=PWM3(LED1_B)
   //   GPIO7=PWM4(LED2_R), GPIO14=PWM5(LED2_G), GPIO15=PWM6(LED2_B)
   //   PWM4-6 werden automatisch von PWM1-3 gespiegelt (support_pwm.ino)
+  //   GPIO9=Button1 (7s halten=Factory-Reset, 5× drücken=WiFi-Reset)
   //   GPIO24-30=Flash (reserviert)
-  //                                                                    PWM1   PWM3PWM2  PWM4            PWM5PWM6
-  #define USER_TEMPLATE "{\"NAME\":\"WattWächter.tasmota\",\"GPIO\":[1,1,416,1,418,417,1,419,1,1,1,1,1,1,420,421,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1,\"CMND\":\"Module 0\"}"
+  //                                                                    PWM1   PWM3PWM2  PWM4      Btn1        PWM5PWM6
+  #define USER_TEMPLATE "{\"NAME\":\"WattWächter.tasmota\",\"GPIO\":[1,1,416,1,418,417,1,419,1,32,1,1,1,1,420,421,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1,\"CMND\":\"Module 0\"}"
 
   // Stack-Size erhöhen (Empfehlung seit Core3)
   #undef  SET_ESP32_STACK_SIZE
