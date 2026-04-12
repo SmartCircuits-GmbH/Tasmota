@@ -39,7 +39,7 @@
  ******************************************************************************************************
  * Zwei Varianten:
  *
- * 1) WattWächter Wifi/USB  (ESP8266, 1M Flash)
+ * 1) WattWächter Wifi/USB  (ESP8285, 1M Flash)
  *    Kompilieren: platformio run -e wattwaechter_wifi_usb
  *
  * 2) WattWächter.tasmota   (ESP32-C6-Mini, 4M Flash)
@@ -198,10 +198,8 @@
   #define FALLBACK_MODULE        WEMOS
   #define USER_TEMPLATE "{\"NAME\":\"WattWächter Wi-Fi / USB\",\"GPIO\":[0,1,0,1,1,1,0,0,1,0,1,0,0,0],\"FLAG\":0,\"BASE\":18,\"CMND\":\"Module 0\"}"
 
-  // Skript-Speicher im EEPROM (1M Flash hat kein Filesystem)
-  #define USE_EEPROM
-  #undef  EEP_SCRIPT_SIZE
-  #define EEP_SCRIPT_SIZE 8192
+  // Skript wird komprimiert in Settings->rules[0] gespeichert (Standard-Tasmota-Verhalten)
+  // Kompatibel mit Standard-Tasmota-Images, kein Sonder-Flash-Sektor.
 
 #endif // WATTWAECHTER_WIFI_USB
 
