@@ -123,7 +123,6 @@
 #undef USE_I2C
 #undef USE_DHT
 #undef USE_DS18x20
-#undef USE_DEEPSLEEP
 #undef USE_ADC
 
 // ESP32-spezifische Features die nicht benötigt werden
