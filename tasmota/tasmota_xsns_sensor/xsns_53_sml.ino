@@ -841,6 +841,15 @@ struct SML_GLOBS {
   uint8_t passthru2usb = 0;            // 0=off, 1-7=meter number for USB passthrough
   uint8_t passthru_saved_loglevel = 0;  // saved seriallog_level before muting
 #endif
+  // IR PIN entry state machine (async, non-blocking)
+  // Sequence of groups, each byte: bit7=long-toggle-after, bits0-6=short-pulse-count
+  int8_t ir_pin_gpio = -1;              // TX GPIO
+  uint8_t ir_pin_seq[16];               // pulse groups
+  uint8_t ir_pin_seq_len = 0;           // number of groups
+  uint8_t ir_pin_seq_idx = 0;           // current group
+  uint8_t ir_pin_pulse_idx = 0;         // current pulse in group
+  uint8_t ir_pin_state = 0;             // 0=idle, 1=act_on, 2=act_off, 3=pulse_on, 4=pulse_off, 5=group_done, 6=long_on, 7=long_off
+  uint32_t ir_pin_next_ms = 0;          // millis() when next state transition
 } sml_globs;
 
 
@@ -6034,7 +6043,7 @@ bool XSNS_53_cmd(void) {
         }
 #endif
 #ifdef WATTWAECHTER_ESP32C6
-      } else if (*cp == 'p') {
+      } else if (*cp == 'u') {
         // USB passthrough: forward raw SML bytes to TasConsole (USB CDC)
         cp++;
         if (isdigit(*cp)) {
@@ -6053,6 +6062,95 @@ bool XSNS_53_cmd(void) {
         }
         ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"passthru: %d\"}}"), sml_globs.passthru2usb);
 #endif
+      } else if (*cp == 'p') {
+        // IR PIN entry + menu navigation (async, non-blocking)
+        // Usage: sensor53 p4721              PIN only
+        //        sensor53 p4721,13t,1t       PIN, then 13 pulses+toggle, then 1 pulse+toggle
+        //        sensor53 p2,4721,13t,1t     via meter 2 TX pin
+        cp++;
+        if (sml_globs.ir_pin_state > 0) {
+          // Abort running sequence
+          if (sml_globs.ir_pin_gpio >= 0) digitalWrite(sml_globs.ir_pin_gpio, HIGH);  // LED off
+          sml_globs.ir_pin_state = 0;
+          ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: aborted\"}}"));
+        } else if (isdigit(*cp)) {
+          // Optional meter index: check if first number is followed by comma AND next char is also digit
+          // "2,4721" → meter 2, PIN 4721
+          // "4721,13t" → meter 1 (default), PIN 4721, nav 13 toggle
+          // Heuristic: if first number is short (1-2 digits) AND second group starts with digit, treat as meter
+          uint8_t meter_idx = 0;
+          char *firstComma = strchr(cp, ',');
+          if (firstComma && (firstComma - cp <= 2) && isdigit(*(firstComma + 1))) {
+            // Small number + comma + digit → could be meter index
+            // Only treat as meter if all chars before comma are digits
+            bool all_digits = true;
+            for (char *p = cp; p < firstComma; p++) {
+              if (!isdigit(*p)) { all_digits = false; break; }
+            }
+            if (all_digits && (firstComma - cp) <= 1) {
+              meter_idx = atoi(cp) - 1;
+              cp = firstComma + 1;
+            }
+          }
+
+          // Parse sequence: PIN digits first (comma-separated groups)
+          // First group = PIN: each digit becomes a group
+          // Subsequent groups = "<N>[t]" where N is pulse count, t = add long toggle pulse
+          sml_globs.ir_pin_seq_len = 0;
+          bool is_first_group = true;
+          while (*cp && sml_globs.ir_pin_seq_len < 16) {
+            if (is_first_group) {
+              // PIN digits: each digit is a separate group
+              while (isdigit(*cp) && sml_globs.ir_pin_seq_len < 16) {
+                uint8_t digit = *cp - '0';
+                sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_len++] = digit;  // no toggle
+                cp++;
+              }
+              is_first_group = false;
+            } else {
+              // Navigation group: <count>[t]
+              uint8_t count = 0;
+              while (isdigit(*cp)) {
+                count = count * 10 + (*cp - '0');
+                cp++;
+              }
+              if (count > 127) count = 127;
+              bool toggle = (*cp == 't');
+              if (toggle) cp++;
+              sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_len++] = count | (toggle ? 0x80 : 0);
+            }
+            if (*cp == ',') cp++;
+            else break;
+          }
+
+          if (sml_globs.ir_pin_seq_len == 0) {
+            ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: no sequence\"}}"));
+          } else {
+            // Resolve TX GPIO
+            int8_t tx_pin = -1;
+            if (meter_idx < sml_globs.meters_used) {
+              tx_pin = sml_globs.mp[meter_idx].trxpin;
+            }
+            if (tx_pin < 0) tx_pin = 1;  // fallback GPIO1
+
+            // Detach pin from UART peripheral, force GPIO output
+            pinMode(tx_pin, OUTPUT);
+            digitalWrite(tx_pin, HIGH);  // LED off (inverted)
+
+            sml_globs.ir_pin_gpio = tx_pin;
+            sml_globs.ir_pin_seq_idx = 0;
+            sml_globs.ir_pin_pulse_idx = 0;
+            sml_globs.ir_pin_state = 1;  // start state machine
+            sml_globs.ir_pin_next_ms = millis();
+
+            AddLog(LOG_LEVEL_INFO, PSTR("SML: IR PIN %d groups on GPIO%d (meter %d)"),
+                   sml_globs.ir_pin_seq_len, tx_pin, meter_idx + 1);
+            ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: %d groups on GPIO%d\"}}"),
+                           sml_globs.ir_pin_seq_len, tx_pin);
+          }
+        } else {
+          ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: usage sensor53 p[meter,]<pin>[,<n>[t]]*\"}}"));
+        }
       } else {
         serviced = false;
       }
@@ -6110,6 +6208,67 @@ bool Xsns53(uint32_t function) {
         if (bitRead(Settings->rule_enabled, 0)) {
           if (sml_globs.ready) {
             SML_Check_Send();
+          }
+        }
+        // IR PIN state machine (async, non-blocking). Inverted logic: LOW=LED on, HIGH=off
+        if (sml_globs.ir_pin_state > 0 && millis() >= sml_globs.ir_pin_next_ms) {
+          switch (sml_globs.ir_pin_state) {
+            case 1:  // activation pulse ON
+              digitalWrite(sml_globs.ir_pin_gpio, LOW);
+              sml_globs.ir_pin_next_ms = millis() + 500;
+              sml_globs.ir_pin_state = 2;
+              break;
+            case 2:  // activation pulse OFF, wait for meter to show PIN/menu
+              digitalWrite(sml_globs.ir_pin_gpio, HIGH);
+              sml_globs.ir_pin_next_ms = millis() + 3500;
+              sml_globs.ir_pin_pulse_idx = 0;
+              sml_globs.ir_pin_state = 3;
+              break;
+            case 3:  // short pulse ON (or skip to group_done)
+              {
+                uint8_t count = sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_idx] & 0x7F;
+                if (sml_globs.ir_pin_pulse_idx < count) {
+                  digitalWrite(sml_globs.ir_pin_gpio, LOW);
+                  sml_globs.ir_pin_next_ms = millis() + 500;
+                  sml_globs.ir_pin_state = 4;
+                } else {
+                  sml_globs.ir_pin_state = 5;  // all short pulses done
+                }
+              }
+              break;
+            case 4:  // short pulse OFF
+              digitalWrite(sml_globs.ir_pin_gpio, HIGH);
+              sml_globs.ir_pin_pulse_idx++;
+              sml_globs.ir_pin_next_ms = millis() + 500;
+              sml_globs.ir_pin_state = 3;
+              break;
+            case 5:  // group short pulses done, check for long toggle
+              if (sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_idx] & 0x80) {
+                // Long toggle pulse: >5s
+                digitalWrite(sml_globs.ir_pin_gpio, LOW);
+                sml_globs.ir_pin_next_ms = millis() + 5500;
+                sml_globs.ir_pin_state = 6;
+              } else {
+                // No toggle: pause and move to next group
+                sml_globs.ir_pin_next_ms = millis() + 3500;
+                sml_globs.ir_pin_state = 7;
+              }
+              break;
+            case 6:  // long toggle pulse done, turn off
+              digitalWrite(sml_globs.ir_pin_gpio, HIGH);
+              sml_globs.ir_pin_next_ms = millis() + 3500;
+              sml_globs.ir_pin_state = 7;
+              break;
+            case 7:  // inter-group pause done, advance
+              sml_globs.ir_pin_seq_idx++;
+              sml_globs.ir_pin_pulse_idx = 0;
+              if (sml_globs.ir_pin_seq_idx < sml_globs.ir_pin_seq_len) {
+                sml_globs.ir_pin_state = 3;
+              } else {
+                sml_globs.ir_pin_state = 0;
+                AddLog(LOG_LEVEL_INFO, PSTR("SML: IR sequence complete"));
+              }
+              break;
           }
         }
         break;
