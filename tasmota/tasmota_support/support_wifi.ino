@@ -1586,6 +1586,11 @@ void WifiConnect(void)
   Wifi.max_retry = 0;
   Wifi.counter = 1;
 
+  // Fast path: no SSID configured → skip all retry delay, start AP manager immediately
+  if (!strlen(SettingsText(SET_STASSID1)) && !strlen(SettingsText(SET_STASSID2))) {
+    Wifi.retry = 0;
+  }
+
   memcpy((void*) &Wifi.bssid, (void*) Settings->wifi_bssid, sizeof(Wifi.bssid));
 
 #ifdef WIFI_RF_PRE_INIT

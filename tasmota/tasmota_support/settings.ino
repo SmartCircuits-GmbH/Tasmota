@@ -281,8 +281,13 @@ void UpdateQuickPowerCycle(bool update) {
     if (0xF == counter) { counter = 0; }
     counter++;
     if (QPC_COUNT == counter) {  // 7 power cycles in a row
-      SettingsErase(3);          // Quickly reset all settings including QuickPowerCycle flag
-      EspRestart();              // And restart
+      // Reset QPC counter first so we don't loop-reset
+      pc_register = QPC_SIGNATURE;
+      QPCWrite(&pc_register, sizeof(pc_register));
+      // Use same mechanism as Reset 1 (long button press): overwrites all storage layers
+      // with defaults via SettingsSaveAll() during restart. More reliable than flash erase.
+      TasmotaGlobal.restart_flag = 211;
+      AddLog(LOG_LEVEL_INFO, PSTR("QPC: 7 cycles reached, triggering factory reset"));
     } else {
       pc_register = 0xFFA55AF0 | counter;
       QPCWrite(&pc_register, sizeof(pc_register));
@@ -912,6 +917,7 @@ void SettingsErase(uint8_t type) {
   else if (3 == type) {    // QPC Reached = QPC and Tasmota and SDK parameter area (0x0F3xxx - 0x0FFFFF)
 #ifdef USE_UFILESYS
     TfsDeleteFile(TASM_FILE_SETTINGS);
+    TfsDeleteFile(TASM_FILE_SETTINGS_LKG);  // Also remove Last-Known-Good backup
 #endif
     EsptoolErase(SETTINGS_LOCATION - CFG_ROTATES, SETTINGS_LOCATION +1);
     _sectorStart = EEPROM_LOCATION;
@@ -1465,6 +1471,10 @@ void SettingsDefaultSet3(void) {
   String user_template = USER_TEMPLATE;
   JsonTemplate((char*)user_template.c_str());
   user_template = (const char*) nullptr;  // Force deallocation of the String internal memory
+  // Activate USER_MODULE directly so GPIO template becomes effective immediately after reboot.
+  // Fixes boot-time QPC reset where the "Module 0" backlog command wasn't executed reliably.
+  Settings->module = USER_MODULE;
+  Settings->last_module = USER_MODULE;
 #endif
 
 #ifdef USE_RULES
