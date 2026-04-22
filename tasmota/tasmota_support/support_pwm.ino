@@ -144,7 +144,9 @@ void PwmApplyGPIO(bool force_update_all) {
   //                         TasmotaGlobal.pwm_cur_phase[4],
   //                         Settings->pwm_range
   //                         );
+#ifndef WATTWAECHTER_ESP32C6
   PwmSaveToSettings();    // copy to Settings
+#endif
   PwmRearmChanges();      // reset expected changes
 }
 
