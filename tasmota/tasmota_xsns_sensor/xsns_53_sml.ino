@@ -6123,6 +6123,15 @@ bool XSNS_53_cmd(void) {
             else break;
           }
 
+          // If sequence ends with a toggle, append a final short pulse to
+          // advance past the toggled menu item (otherwise meter stays on it forever).
+          if (sml_globs.ir_pin_seq_len > 0 && sml_globs.ir_pin_seq_len < 16) {
+            uint8_t last = sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_len - 1];
+            if (last & 0x80) {
+              sml_globs.ir_pin_seq[sml_globs.ir_pin_seq_len++] = 1;  // 1 short pulse, no toggle
+            }
+          }
+
           if (sml_globs.ir_pin_seq_len == 0) {
             ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: no sequence\"}}"));
           } else {
