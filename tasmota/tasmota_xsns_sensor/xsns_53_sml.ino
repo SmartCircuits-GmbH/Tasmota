@@ -6067,13 +6067,14 @@ bool XSNS_53_cmd(void) {
         // Usage: sensor53 p4721              PIN only
         //        sensor53 p4721,13t,1t       PIN, then 13 pulses+toggle, then 1 pulse+toggle
         //        sensor53 p2,4721,13t,1t     via meter 2 TX pin
+        //        sensor53 p,13t,1t           navigation only (no PIN)
         cp++;
         if (sml_globs.ir_pin_state > 0) {
           // Abort running sequence
           if (sml_globs.ir_pin_gpio >= 0) digitalWrite(sml_globs.ir_pin_gpio, HIGH);  // LED off
           sml_globs.ir_pin_state = 0;
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"IR PIN: aborted\"}}"));
-        } else if (isdigit(*cp)) {
+        } else if (isdigit(*cp) || *cp == ',') {
           // Optional meter index: check if first number is followed by comma AND next char is also digit
           // "2,4721" → meter 2, PIN 4721
           // "4721,13t" → meter 1 (default), PIN 4721, nav 13 toggle
@@ -6096,8 +6097,13 @@ bool XSNS_53_cmd(void) {
           // Parse sequence: PIN digits first (comma-separated groups)
           // First group = PIN: each digit becomes a group
           // Subsequent groups = "<N>[t]" where N is pulse count, t = add long toggle pulse
+          // Leading comma (e.g. "p,13t") skips the PIN phase — navigation only.
           sml_globs.ir_pin_seq_len = 0;
           bool is_first_group = true;
+          if (*cp == ',') {
+            is_first_group = false;
+            cp++;
+          }
           while (*cp && sml_globs.ir_pin_seq_len < 16) {
             if (is_first_group) {
               // PIN digits: each digit is a separate group
