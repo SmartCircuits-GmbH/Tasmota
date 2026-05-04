@@ -42,7 +42,7 @@
  * 1) WattWächter Wifi/USB  (ESP8285, 1M Flash)
  *    Kompilieren: platformio run -e wattwaechter_wifi_usb
  *
- * 2) WattWächter.tasmota   (ESP32-C6-Mini, 4M Flash)
+ * 2) WattWächter Wi-Fi / USB  (ESP32-C6-Mini, 8M Flash)
  *    Kompilieren: platformio run -e wattwaechter_esp32c6
  *
  * Beide Varianten sind optimiert für SML-Smartmeter-Auslesung mit IR-Lesekopf.
@@ -50,10 +50,34 @@
 \*****************************************************************************************************/
 
 // ============================================================================
-// Gemeinsame Konfiguration: WattWächter Wifi/USB + WattWächter.tasmota
-// (siehe platformio_tasmota_cenv.ini für die Build-Environments)
+// OTA URLs (gelten für Hauptfirmware UND Safeboot-Build)
+// ----------------------------------------------------------------------------
+// Diese sind hier per #define statt als build_flag in der platformio.ini
+// definiert, weil PIO LDF beim Parsen von "xn--" in build_flags die
+// Library-Resolution für HTTPS-Builds bricht (HTTPClientLight nicht gelinkt).
 // ============================================================================
-#if defined(WATTWAECHTER_WIFI_USB) || defined(WATTWAECHTER_ESP32C6)
+#if defined(WATTWAECHTER_WIFI_USB)
+  // ESP8285: HTTP (gzip-OTA-Kompatibilität mit ESP8266-BearSSL nicht
+  // verifiziert; HTTPS-Umstellung möglich, aber müsste getestet werden).
+  #undef  OTA_URL
+  #define OTA_URL "http://upgrade.smartcircuits.de/wattwaechter/latest/tasmota.bin.gz"
+#endif
+#if defined(WATTWAECHTER_ESP32C6)
+  // ESP32-C6: HTTPS via AWS-CDN
+  #undef  OTA_URL
+  #define OTA_URL "https://download.xn--wattwchter-u5a.de/firmware/ww_wifiusb_esp32/latest/firmware.bin"
+#endif
+
+// ============================================================================
+// Gemeinsame Konfiguration: WattWächter Wi-Fi / USB (ESP8285 + ESP32-C6)
+// (siehe platformio_tasmota_cenv.ini für die Build-Environments)
+//
+// Hinweis: FIRMWARE_SAFEBOOT ist die Recovery-Variante mit minimalem
+// Footprint. Sie soll *keine* WattWächter-Features (SML, BLE, Script,
+// LED, MQTT-TLS, Prometheus) enthalten — nur Web-UI für OTA-Recovery.
+// Daher umschließen wir die ganze Konfiguration mit !FIRMWARE_SAFEBOOT.
+// ============================================================================
+#if (defined(WATTWAECHTER_WIFI_USB) || defined(WATTWAECHTER_ESP32C6)) && !defined(FIRMWARE_SAFEBOOT)
 
 // ---- Projekt-Name ----------------------------------------------------------
 #undef  PROJECT
@@ -203,13 +227,13 @@
 #endif // WATTWAECHTER_WIFI_USB
 
 // ============================================================================
-// ESP32-C6-spezifisch: WattWächter.tasmota (8M Flash)
+// ESP32-C6-spezifisch: WattWächter Wi-Fi / USB Gen2 (8M Flash)
 // ============================================================================
 #if defined(WATTWAECHTER_ESP32C6)
 
   #undef  FALLBACK_MODULE
   #define FALLBACK_MODULE        WEMOS
-  // GPIO-Belegung WattWächter.tasmota (ESP32-C6-Mini):
+  // GPIO-Belegung WattWächter Wi-Fi / USB Gen2 (ESP32-C6-Mini):
   //   GPIO1=SML_TX, GPIO3=SML_RX (IR-Lesekopf, Pin-Zuweisung im Script)
   //   GPIO2=PWM1(LED1_R), GPIO5=PWM2(LED1_G), GPIO4=PWM3(LED1_B)
   //   GPIO7=PWM4(LED2_R), GPIO14=PWM5(LED2_G), GPIO15=PWM6(LED2_B)
@@ -217,7 +241,7 @@
   //   GPIO9=Button1 (7s halten=Factory-Reset, 5× drücken=WiFi-Reset)
   //   GPIO24-30=Flash (reserviert)
   //                                                                    PWM1   PWM3PWM2  PWM4      Btn1        PWM5PWM6
-  #define USER_TEMPLATE "{\"NAME\":\"WattWächter.tasmota\",\"GPIO\":[1,1,416,1,418,417,1,419,1,32,1,1,1,1,420,421,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1,\"CMND\":\"Module 0\"}"
+  #define USER_TEMPLATE "{\"NAME\":\"WattWächter Wi-Fi / USB\",\"GPIO\":[1,1,416,1,418,417,1,419,1,32,1,1,1,1,420,421,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":1,\"CMND\":\"Module 0\"}"
 
   // Stack-Size erhöhen (Empfehlung seit Core3)
   #undef  SET_ESP32_STACK_SIZE
