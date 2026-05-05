@@ -812,6 +812,8 @@ struct SML_GLOBS {
   uint8_t dump2log = 0;
   uint8_t ser_act_LED_pin = 255;
   uint8_t ser_act_meter_num = 0;
+  uint32_t last_activity_ms = 0;        // millis() of last received UART byte (when activity_pulse on)
+  uint8_t activity_pulse = 0;           // 1 = expose activity timestamp via SML_LastActivityMs()
   uint16_t sml_logindex;
   char *log_data;
 	uint16_t logsize = SML_DUMP_SIZE;
@@ -2504,25 +2506,17 @@ uint32_t meters;
         if (mp->srcpin != TCP_MODE_FLG) {
           if (!mp->meter_ss) continue;
           // poll for serial input
-          if (sml_globs.ser_act_LED_pin != 255 && (sml_globs.ser_act_meter_num == 0 || sml_globs.ser_act_meter_num - 1 == meters)) {
 #ifdef WATTWAECHTER_ESP32C6
-            // WattWächter LED-Ring: PWM-Steuerung statt digitalWrite, inkl. Mirror-Pin
-            static bool ww_sml_led_state = false;
-            if (mp->meter_ss->available()) { ww_sml_led_state = !ww_sml_led_state; }
-            uint32_t ww_pwm_val = ww_sml_led_state ? 1023 : 0;
-            analogWrite(sml_globs.ser_act_LED_pin, ww_pwm_val);
-            // Mirror-Pin: LED1↔LED2 Paare (GPIO 2↔7, 5↔14, 4↔15)
-            int8_t ww_mirror = -1;
-            switch (sml_globs.ser_act_LED_pin) {
-              case 2: ww_mirror = 7; break;   case 7: ww_mirror = 2; break;
-              case 5: ww_mirror = 14; break;  case 14: ww_mirror = 5; break;
-              case 4: ww_mirror = 15; break;  case 15: ww_mirror = 4; break;
-            }
-            if (ww_mirror >= 0) { analogWrite(ww_mirror, ww_pwm_val); }
-#else
-            digitalWrite(sml_globs.ser_act_LED_pin, mp->meter_ss->available() && !digitalRead(sml_globs.ser_act_LED_pin)); // Invert LED, if queue is continuously full
-#endif
+          // WattWächter: just expose UART activity timestamp; the LED ring
+          // driver (xdrv_98) decides how to visualise it (brief LED-off pulse).
+          if (sml_globs.activity_pulse && (sml_globs.ser_act_meter_num == 0 || sml_globs.ser_act_meter_num - 1 == meters)) {
+            if (mp->meter_ss->available()) { sml_globs.last_activity_ms = millis(); }
           }
+#else
+          if (sml_globs.ser_act_LED_pin != 255 && (sml_globs.ser_act_meter_num == 0 || sml_globs.ser_act_meter_num - 1 == meters)) {
+            digitalWrite(sml_globs.ser_act_LED_pin, mp->meter_ss->available() && !digitalRead(sml_globs.ser_act_LED_pin)); // Invert LED, if queue is continuously full
+          }
+#endif
 #ifdef USE_SML_EBUS_ARB
           // arb meter: the onReceive RX-event task is the sole reader (it feeds ebus_feed_byte);
           // draining here too would double-consume the bus symbols and wreck arbitration timing.
@@ -5200,6 +5194,24 @@ double SML_GetVal(uint32_t index) {
   return sml_globs.meter_vars[index - 1];
 }
 
+// Returns the millis() timestamp of the most recent UART byte received,
+// while activity_pulse is enabled (0 if disabled or no activity yet).
+// Used by xdrv_98 to briefly turn the LED off on incoming data.
+uint32_t SML_LastActivityMs(void) {
+  if (!sml_globs.activity_pulse) return 0;
+  return sml_globs.last_activity_ms;
+}
+
+// Returns true if at least one SML variable has received a valid reading.
+// Used by external drivers (e.g. LED indicator) to detect "data is flowing".
+bool SML_HasValidData(void) {
+  if (!sml_globs.ready || !sml_globs.dvalid || sml_globs.maxvars == 0) return false;
+  for (uint8_t i = 0; i < sml_globs.maxvars; i++) {
+    if (sml_globs.dvalid[i]) return true;
+  }
+  return false;
+}
+
 char *SML_GetSVal(uint32_t index) {
   if (sml_globs.ready == false) return 0;
   if (index < 1 || index > sml_globs.meters_used) { index = 1;}
@@ -6004,21 +6016,24 @@ bool XSNS_53_cmd(void) {
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_meter_num: %d\"}}"), sml_globs.ser_act_meter_num);
         }
       } else if (*cp == 'l') {
-        // serial activity LED-GPIO
+        // serial activity LED:
+        //   ESP32-C6: 'sensor53 l1' = enable LED activity pulse via xdrv_98
+        //             'sensor53 l0' = disable
+        //   ESP8266 : 'sensor53 l<gpio>' = toggle LED at given GPIO on activity
         cp++;
+#ifdef WATTWAECHTER_ESP32C6
+        if (!isdigit(*cp)) {
+          ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"activity_pulse: %d\"}}"), sml_globs.activity_pulse);
+        } else {
+          sml_globs.activity_pulse = (atoi(cp) > 0) ? 1 : 0;
+          if (!sml_globs.activity_pulse) sml_globs.last_activity_ms = 0;
+          ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"activity_pulse: %d\"}}"), sml_globs.activity_pulse);
+        }
+#else
         if (!isdigit(*cp)) {
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_LED_pin: %d\"}}"), sml_globs.ser_act_LED_pin);
         } else {
           sml_globs.ser_act_LED_pin = atoi(cp);
-#ifdef WATTWAECHTER_ESP32C6
-          // WattWächter: Clear all LED ring GPIOs before setting activity LED
-          {
-            const uint8_t led_gpios[] = {2, 5, 4, 7, 14, 15};
-            for (uint8_t i = 0; i < 6; i++) {
-              analogWrite(led_gpios[i], 0);
-            }
-          }
-#else
           if (Gpio_used(sml_globs.ser_act_LED_pin)) {
             AddLog(LOG_LEVEL_INFO, PSTR("SML: Error: Duplicate GPIO %d defined. Not usable for LED."), sml_globs.ser_act_LED_pin);
             sml_globs.ser_act_LED_pin = 255;
@@ -6026,7 +6041,6 @@ bool XSNS_53_cmd(void) {
           if (sml_globs.ser_act_LED_pin != 255) {
             pinMode(sml_globs.ser_act_LED_pin, OUTPUT);
           }
-#endif
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_LED_pin: %d\"}}"), sml_globs.ser_act_LED_pin);
         }
 #ifdef USE_SML_EBUS_ARB
