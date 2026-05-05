@@ -65,7 +65,18 @@
 #if defined(WATTWAECHTER_ESP32C6)
   // ESP32-C6: HTTPS via AWS-CDN
   #undef  OTA_URL
-  #define OTA_URL "https://download.xn--wattwchter-u5a.de/firmware/ww_wifiusb_esp32/latest/firmware.bin"
+  #define OTA_URL "https://download.xn--wattwchter-u5a.de/firmware/ww_wifi_usb_esp32/latest/firmware.bin"
+#endif
+
+// ============================================================================
+// Branding (gilt für Hauptfirmware UND Safeboot-Build)
+// ----------------------------------------------------------------------------
+// Footer auf jeder Web-Seite: "WattWächter <ver> by SmartCircuits GmbH
+// (basiert auf Tasmota)" mit Link auf docs.wattwächter.de.
+// Aktiviert den entsprechenden #ifdef-Block in xdrv_01_9_webserver.ino.
+// ============================================================================
+#if defined(WATTWAECHTER_WIFI_USB) || defined(WATTWAECHTER_ESP32C6)
+  #define WATTWAECHTER_BRANDING
 #endif
 
 // ============================================================================
@@ -82,6 +93,11 @@
 // ---- Projekt-Name ----------------------------------------------------------
 #undef  PROJECT
 #define PROJECT                "WattWaechter"
+
+// Device-Namen ("Tasmota") im Header ausblenden (entspricht SetOption163 1).
+// Modulname "WattWächter Wi-Fi / USB" reicht aus, sonst stünde es doppelt da.
+#undef  GUI_NOSHOW_DEVICENAME
+#define GUI_NOSHOW_DEVICENAME  1
 
 #undef  MODULE
 #define MODULE                 WEMOS

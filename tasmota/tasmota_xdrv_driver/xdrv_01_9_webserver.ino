@@ -424,7 +424,12 @@ const char HTTP_COUNTER[] PROGMEM =
   "<br><div id='t' style='text-align:center;'></div>";
 
 const char HTTP_END[] PROGMEM =
+#ifdef WATTWAECHTER_BRANDING
+  "<p></p><div style='text-align:center;font-size:11px;'><hr><a href='https://docs.xn--wattwchter-u5a.de/wifi-usb' target='_blank' style='color:#aaa;'>"
+  "WattW&auml;chter %s " D_BY " SmartCircuits GmbH<br>(basiert auf Tasmota)</a></div>"
+#else
   "<p></p><div style='text-align:right;font-size:11px;'><hr><a href='https://github.com/arendst/Tasmota' target='_blank' style='color:#aaa;'>Tasmota %s %s " D_BY " Theo Arends</a></div>"
+#endif
   "</div>"
   "</body>"
   "</html>";
