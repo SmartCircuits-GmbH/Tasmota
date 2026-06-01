@@ -1,7 +1,7 @@
 {
     "build": {
       "core": "esp32",
-      "extra_flags": "-DARDUINO_TASMOTA -DARDUINO_USB_MODE=1 -DESP32_8M -DESP32C6 -DUSE_USB_CDC_CONSOLE",
+      "extra_flags": "-DARDUINO_TASMOTA -DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1 -DESP32_8M -DESP32C6",
       "f_cpu": "160000000L",
       "f_flash": "80000000L",
       "flash_mode": "qio",
