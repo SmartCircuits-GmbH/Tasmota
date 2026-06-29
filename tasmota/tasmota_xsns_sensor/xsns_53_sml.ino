@@ -6043,6 +6043,7 @@ bool XSNS_53_cmd(void) {
           }
           ResponseTime_P(PSTR(",\"SML\":{\"CMD\":\"sml_globs.ser_act_LED_pin: %d\"}}"), sml_globs.ser_act_LED_pin);
         }
+#endif
 #ifdef USE_SML_EBUS_ARB
       } else if (*cp == 'a') {
         // eBUS in-firmware arbitration diagnostics (won/lost/late tune EBM_ARB_TX_LEAD_US on the scope)
