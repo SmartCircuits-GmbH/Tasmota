@@ -15,6 +15,10 @@
 
   If the user manually triggers another upgrade or reboots into app0
   themselves within the grace period, the fallback is skipped.
+
+  A single short press of the button (Button1) while no OTA is running
+  also returns to app0 immediately. Longer holds (factory reset) and
+  multi-presses (e.g. 5x Wi-Fi reset) keep their standard behaviour.
 */
 
 #ifdef WATTWAECHTER_ESP32C6
@@ -33,15 +37,18 @@ static struct {
   uint32_t fallback_at;        // millis() when fallback should trigger
 } wwSbf;
 
-static void wwSbfBootApp0(void) {
-  AddLog(LOG_LEVEL_INFO, PSTR("SBF: OTA failed, returning to app0"));
+static void wwSbfBootApp0(const char* reason) {
+  AddLog(LOG_LEVEL_INFO, PSTR("SBF: %s, returning to app0"), reason);
   const esp_partition_t* partition = esp_ota_get_next_update_partition(nullptr);
-  if (partition) {
-    esp_err_t err = esp_ota_set_boot_partition(partition);
-    if (err != ESP_OK) {
-      AddLog(LOG_LEVEL_INFO, PSTR("SBF: set_boot_partition failed: %d"), err);
-      return;
-    }
+  if (!partition) {
+    AddLog(LOG_LEVEL_INFO, PSTR("SBF: no app0 partition"));
+    return;
+  }
+  // Also validates the app0 image, so a broken app0 keeps us in safeboot.
+  esp_err_t err = esp_ota_set_boot_partition(partition);
+  if (err != ESP_OK) {
+    AddLog(LOG_LEVEL_INFO, PSTR("SBF: set_boot_partition failed: %d"), err);
+    return;
   }
   TasmotaGlobal.restart_flag = 2;
 }
@@ -75,7 +82,17 @@ bool Xdrv96(uint32_t function) {
       // Grace timer expired -> switch to app0.
       if (wwSbf.fallback_armed && (int32_t)(millis() - wwSbf.fallback_at) >= 0) {
         wwSbf.fallback_armed = false;
-        wwSbfBootApp0();
+        wwSbfBootApp0(PSTR("OTA failed"));
+      }
+      break;
+
+    case FUNC_BUTTON_MULTI_PRESSED:
+      // Called after the multi-press window closed, with the press count.
+      // Single press on Button1 -> leave safeboot. Not during an OTA.
+      if ((0 == XdrvMailbox.index) && (1 == XdrvMailbox.payload) &&
+          (0 == TasmotaGlobal.ota_state_flag)) {
+        wwSbfBootApp0(PSTR("Button pressed"));
+        return true;   // serviced, skip default single-press action
       }
       break;
 
