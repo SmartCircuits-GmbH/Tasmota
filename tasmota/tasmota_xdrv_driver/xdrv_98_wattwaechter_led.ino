@@ -120,6 +120,15 @@ void (* const WWLedCommand[])(void) PROGMEM = {
 
 bool Xdrv98(uint32_t function) {
   switch (function) {
+    case FUNC_PRE_INIT:
+      // Serial log is only ever silenced at runtime (sensor53 u). Undo a
+      // persisted SerialLog 0 left behind by the old ClaimSerial() path so
+      // the USB console (incl. safeboot) logs again.
+      if (LOG_LEVEL_NONE == Settings->seriallog_level) {
+        SetTasConlog(LOG_LEVEL_INFO);
+      }
+      break;
+
     case FUNC_BUTTON_PRESSED:
       if (XdrvMailbox.index == 0) {
         if (XdrvMailbox.payload == 0) {
