@@ -56,6 +56,8 @@ static constexpr uint32_t WWLED_RESET_HINT_MS = 2000;
 #ifdef FIRMWARE_SAFEBOOT
 // Full fade-in + fade-out cycle of the safeboot idle indication (ms).
 static constexpr uint32_t WWLED_BREATHE_MS = 3000;
+// Lowest brightness of the breathing fade (PWM units, max colour is 102).
+static constexpr uint16_t WWLED_BREATHE_MIN = 6;
 #endif
 
 #ifndef FIRMWARE_SAFEBOOT
@@ -85,11 +87,12 @@ static void wwLedSet(uint8_t color) {
     case WWLED_MAGENTA: r = 102; b = 102; break;
 #ifdef FIRMWARE_SAFEBOOT
     case WWLED_BREATHE: {
-      // Triangle wave, squared so the fade looks even to the eye.
-      uint32_t half  = WWLED_BREATHE_MS / 2;
-      uint32_t phase = millis() % WWLED_BREATHE_MS;
-      uint32_t tri   = (phase < half) ? phase : WWLED_BREATHE_MS - phase;
-      r = b = (uint16_t)(102UL * tri * tri / (half * half));
+      // Raised cosine eases in/out at the turning points; cubed for a
+      // perceptually even fade. Never fully off: the lowest PWM steps are
+      // visible jumps and "off" reads as blinking.
+      float phase = (float)(millis() % WWLED_BREATHE_MS) / WWLED_BREATHE_MS;
+      float s = (1.0f - cosf(2.0f * (float)M_PI * phase)) * 0.5f;
+      r = b = WWLED_BREATHE_MIN + (uint16_t)((102 - WWLED_BREATHE_MIN) * s * s * s + 0.5f);
       break;
     }
 #endif
