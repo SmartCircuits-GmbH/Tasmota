@@ -2208,7 +2208,9 @@ void sml_shift_in(uint32_t meters, uint32_t shard) {
     iob = (uint8_t)mp->meter_ss->read();
 #ifdef WATTWAECHTER_ESP32C6
     if (sml_globs.passthru2usb && ((sml_globs.passthru2usb & 7) - 1 == (int)meters)) {
-      TasConsole.write(iob);
+      // ASCII-OBIS meters (type 'o') transmit 7E1 - strip the parity/8th bit so
+      // the raw USB dump stays readable. Binary SML ('s') etc. keep all 8 bits.
+      TasConsole.write((mp->type == 'o') ? (iob & 0x7f) : iob);
     }
 #endif
   } else {
