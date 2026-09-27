@@ -20,7 +20,10 @@
     RED      - Button held for reset.
     MAGENTA  - OTA in progress (this is where the actual download happens
                after the main firmware reboots into safeboot).
-    OFF      - Otherwise (no script / SML / WiFi config in safeboot).
+    MAGENTA breathing - Safeboot idle (no OTA running, e.g. no Wi-Fi yet).
+               Makes a device stuck in safeboot distinguishable from a
+               dead one.
+    OFF      - Restart pending.
 */
 
 #ifdef WATTWAECHTER_ESP32C6
@@ -48,6 +51,12 @@ static constexpr uint32_t WWLED_RESET_HINT_MS = 2000;
 #define WWLED_ORANGE  4
 #define WWLED_GREEN   5
 #define WWLED_MAGENTA 6
+#define WWLED_BREATHE 7   // magenta fading in and out (safeboot idle)
+
+#ifdef FIRMWARE_SAFEBOOT
+// Full fade-in + fade-out cycle of the safeboot idle indication (ms).
+static constexpr uint32_t WWLED_BREATHE_MS = 3000;
+#endif
 
 #ifndef FIRMWARE_SAFEBOOT
 // Forward declarations for SML helpers (live in xsns_53_sml.ino).
@@ -64,7 +73,8 @@ static struct {
 } wwLed;
 
 static void wwLedSet(uint8_t color) {
-  if (color == wwLed.current) return;
+  // Breathing changes brightness every tick, all other colours are static.
+  if (color == wwLed.current && color != WWLED_BREATHE) return;
   uint16_t r = 0, g = 0, b = 0;
   switch (color) {
     case WWLED_RED:     r = 102; break;
@@ -73,6 +83,16 @@ static void wwLedSet(uint8_t color) {
     case WWLED_ORANGE:  r = 200; g = 40;  break;
     case WWLED_GREEN:   g = 102; break;
     case WWLED_MAGENTA: r = 102; b = 102; break;
+#ifdef FIRMWARE_SAFEBOOT
+    case WWLED_BREATHE: {
+      // Triangle wave, squared so the fade looks even to the eye.
+      uint32_t half  = WWLED_BREATHE_MS / 2;
+      uint32_t phase = millis() % WWLED_BREATHE_MS;
+      uint32_t tri   = (phase < half) ? phase : WWLED_BREATHE_MS - phase;
+      r = b = (uint16_t)(102UL * tri * tri / (half * half));
+      break;
+    }
+#endif
     case WWLED_OFF:     break;
   }
   TasmotaGlobal.pwm_value[WWLED_R] = r;
@@ -112,7 +132,11 @@ bool Xdrv98(uint32_t function) {
       }
       break;
 
+#ifdef FIRMWARE_SAFEBOOT
+    case FUNC_EVERY_50_MSECOND: {     // finer steps for a smooth breathing fade
+#else
     case FUNC_EVERY_100_MSECOND: {
+#endif
       uint8_t desired = WWLED_OFF;
 
       bool button_held_long =
@@ -126,9 +150,14 @@ bool Xdrv98(uint32_t function) {
       } else if (ota_in_progress) {
         desired = WWLED_MAGENTA;
       }
-#ifndef FIRMWARE_SAFEBOOT
-      // Operating states only meaningful in the main firmware. Safeboot
-      // doesn't run a script or SML, so it stays OFF when not in OTA/reset.
+#ifdef FIRMWARE_SAFEBOOT
+      // Safeboot idle: no OTA running (yet). Breathe so a device stuck here,
+      // e.g. without Wi-Fi after an auto-update, doesn't look dead.
+      else if (!restart_pending) {
+        desired = WWLED_BREATHE;
+      }
+#else
+      // Operating states only meaningful in the main firmware.
       else if (wwLed.disabled) {
         // User switched the status LED off (WWLed 0). Reset-preview (red)
         // and OTA (magenta) above keep their priority; everything else off.
