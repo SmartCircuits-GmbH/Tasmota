@@ -60,6 +60,7 @@ static constexpr uint32_t WWLED_ACTIVITY_PULSE_MS = 80;
 static struct {
   uint32_t press_start;
   uint8_t  current;
+  bool     disabled;    // WWLed 0 → suppress the steady status colours
 } wwLed;
 
 static void wwLedSet(uint8_t color) {
@@ -80,6 +81,22 @@ static void wwLedSet(uint8_t color) {
   PwmApplyGPIO(false);
   wwLed.current = color;
 }
+
+const char kWWLedCommands[] PROGMEM = "|"  // no command prefix
+  "WWLed";
+
+void CmndWWLed(void) {
+  // WWLed 0 = turn the steady status LED off, WWLed 1 = on (default).
+  // Runtime flag only; add `=>WWLed 0` to the script >B section to make it
+  // persistent across reboots. Reset-preview (red) and OTA (magenta) still show.
+  if (XdrvMailbox.data_len > 0) {
+    wwLed.disabled = (XdrvMailbox.payload == 0);
+  }
+  ResponseCmndNumber(wwLed.disabled ? 0 : 1);
+}
+
+void (* const WWLedCommand[])(void) PROGMEM = {
+  &CmndWWLed };
 
 bool Xdrv98(uint32_t function) {
   switch (function) {
@@ -112,7 +129,11 @@ bool Xdrv98(uint32_t function) {
 #ifndef FIRMWARE_SAFEBOOT
       // Operating states only meaningful in the main firmware. Safeboot
       // doesn't run a script or SML, so it stays OFF when not in OTA/reset.
-      else if (Wifi.config_type != 0) {
+      else if (wwLed.disabled) {
+        // User switched the status LED off (WWLed 0). Reset-preview (red)
+        // and OTA (magenta) above keep their priority; everything else off.
+        desired = WWLED_OFF;
+      } else if (Wifi.config_type != 0) {
         desired = WWLED_CYAN;
       } else if (!bitRead(Settings->rule_enabled, 0)) {
         desired = WWLED_YELLOW;
@@ -136,6 +157,9 @@ bool Xdrv98(uint32_t function) {
       wwLedSet(desired);
       break;
     }
+
+    case FUNC_COMMAND:
+      return DecodeCommand(kWWLedCommands, WWLedCommand);
 
     case FUNC_ACTIVE:
       return true;
