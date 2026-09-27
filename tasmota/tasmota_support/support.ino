@@ -2249,6 +2249,11 @@ void ClaimSerial(void) {
   }
 #endif  // USE_USB_CDC_CONSOLE
 #endif  // ESP32C3/C6, S2 or S3
+#if defined(WATTWAECHTER_ESP32C6) && ARDUINO_USB_CDC_ON_BOOT
+  // Console is USB CDC (Serial == HWCDC), UART0 is free for SML. Keep the
+  // console alive and don't persist SerialLog 0.
+  return;
+#endif  // WATTWAECHTER_ESP32C6 && ARDUINO_USB_CDC_ON_BOOT
 #endif  // ESP32
   TasmotaGlobal.serial_local = true;
   AddLog(LOG_LEVEL_INFO, PSTR("SNS: Hardware Serial"));
