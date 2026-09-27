@@ -16,6 +16,12 @@
   If the user manually triggers another upgrade or reboots into app0
   themselves within the grace period, the fallback is skipped.
 
+  The OTA only starts once the network is up. If the safeboot never gets
+  a network (e.g. it can't join the Wi-Fi), no OTA is ever attempted and
+  the pattern above never happens. So after WWSBF_NO_NET_S without any
+  network since boot, the driver also returns to app0 (not while the
+  Wi-Fi manager AP is active, the user may be configuring it).
+
   A single short press of the button (Button1) while no OTA is running
   also returns to app0 immediately. Longer holds (factory reset) and
   multi-presses (e.g. 5x Wi-Fi reset) keep their standard behaviour.
@@ -30,11 +36,16 @@
 
 // Wait this long after a failed OTA before automatically returning to app0.
 #define WWSBF_GRACE_MS  30000
+// Return to app0 if the network has not come up at all within this time.
+// Generous enough for a router that boots slower after a power outage.
+#define WWSBF_NO_NET_S  300
 
 static struct {
   bool     had_ota;            // an OTA attempt has been observed
   bool     fallback_armed;     // grace timer is running
   uint32_t fallback_at;        // millis() when fallback should trigger
+  bool     net_seen;           // network was up at least once this boot
+  bool     no_net_done;        // no-network fallback already attempted
 } wwSbf;
 
 static void wwSbfBootApp0(const char* reason) {
@@ -66,6 +77,18 @@ bool Xdrv96(uint32_t function) {
       // Already restarting (success path or other reason)? Stand down.
       if (TasmotaGlobal.restart_flag != 0) {
         wwSbf.fallback_armed = false;
+        break;
+      }
+
+      // Network never came up -> the OTA can't even start. Don't stay in
+      // safeboot forever. Attempted once; a broken app0 keeps us here.
+      if (!TasmotaGlobal.global_state.network_down) {
+        wwSbf.net_seen = true;
+      }
+      if (!wwSbf.had_ota && !wwSbf.net_seen && !wwSbf.no_net_done &&
+          !WifiIsInManagerMode() && (TasmotaGlobal.uptime >= WWSBF_NO_NET_S)) {
+        wwSbf.no_net_done = true;
+        wwSbfBootApp0(PSTR("No network"));
         break;
       }
 
