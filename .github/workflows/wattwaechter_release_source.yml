@@ -1,0 +1,84 @@
+name: WattWächter source release
+
+# Builds a GPL-compliant source archive whenever a release tag is pushed
+# and uploads it to AWS S3 / CloudFront. The archive is the "preferred
+# form for making modifications" — i.e. the full Tasmota snapshot at
+# that tag including our patches, README, and LICENSE.
+#
+# Tag pattern: anything starting with "ww-" or "v*-ww*" (e.g. "ww-15.4.0",
+# "v15.4.0-ww-1"). Doesn't trigger on plain Tasmota upstream tags.
+#
+# Required GitHub repo secrets:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  - IAM user limited to
+#       s3:PutObject on s3://<S3_BUCKET>/source/* and the listed
+#       cloudfront:CreateInvalidation on the distribution.
+#   S3_BUCKET                                 - bucket name (no s3://)
+#   CLOUDFRONT_DISTRIBUTION_ID                - distribution to invalidate
+
+on:
+  push:
+    tags:
+      - 'ww-*'
+      - 'v*-ww*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag (no submodules, full history not needed)
+        uses: actions/checkout@v4
+        with:
+          # We only need the tag's tree, not the entire history,
+          # for the source archive. fetch-depth: 1 is fine.
+          fetch-depth: 1
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building source archive for tag: $TAG"
+
+      - name: Build source archive
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          ARCHIVE="wattwaechter-source-${TAG}.zip"
+
+          # git archive produces a deterministic, .git-free, build-artifact-
+          # free snapshot of the working tree at the tag.
+          git archive --format=zip --output="$ARCHIVE" "$TAG"
+
+          ls -lh "$ARCHIVE"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Upload to S3 (versioned + latest)
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          BUCKET="${{ secrets.S3_BUCKET }}"
+
+          # Versioned copy stays around forever for GPL §6 compliance
+          aws s3 cp "$ARCHIVE" "s3://$BUCKET/source/$ARCHIVE" \
+            --content-type "application/zip" \
+            --cache-control "public,max-age=31536000,immutable"
+
+          # "latest" points to the most recent release, useful for the
+          # public landing page link.
+          aws s3 cp "$ARCHIVE" "s3://$BUCKET/source/wattwaechter-source-latest.zip" \
+            --content-type "application/zip" \
+            --cache-control "public,max-age=300"
+
+      - name: Invalidate CloudFront cache for /source/*
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/source/wattwaechter-source-latest.zip"
