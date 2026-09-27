@@ -4,7 +4,7 @@
   SPDX-License-Identifier: GPL-3.0-or-later
   Copyright (C) 2026 SmartCircuits GmbH
 
-  Optional monthly firmware self-update (off by default). When enabled, the device
+  Optional monthly firmware self-update (on by default). When enabled, the device
   triggers `Upgrade 1` against the configured OtaUrl roughly every
   WWAU_INTERVAL_DAYS once per device-specific quiet hour (3-5 a.m.).
   Update window (hour:minute) is derived deterministically from the
@@ -14,13 +14,14 @@
   Console:
     AutoUpdate         - show current state, update window, last run
     AutoUpdate 0       - disable
-    AutoUpdate 1       - enable (default off). The first update follows
-                         WWAU_INTERVAL_DAYS after enabling, not right away
+    AutoUpdate 1       - enable (default on). The first update follows
+                         WWAU_INTERVAL_DAYS after the first update window,
+                         not in the first night after flashing
     AutoUpdate 2       - trigger an upgrade NOW (debug / manual recovery,
                          bypasses both interval and time-of-day window)
 
   Persistence: NVS namespace "ww_au"
-    enabled : 1 byte  (0 = off, 1 = on; missing = off)
+    enabled : 1 byte  (0 = off, 1 = on; missing = on)
     last    : 4 bytes (UTC timestamp of last triggered update)
 */
 
@@ -35,7 +36,7 @@
 #define WWAU_INTERVAL_DAYS  30
 
 static struct {
-  uint8_t  enabled = 0;      // 0 = off, 1 = on (default off)
+  uint8_t  enabled = 1;      // 0 = off, 1 = on (default on)
   uint8_t  hour;             // 3..5 (derived from MAC)
   uint8_t  minute;           // 0..59 (derived from MAC)
   uint32_t last_utc;         // UTC timestamp of last triggered upgrade
