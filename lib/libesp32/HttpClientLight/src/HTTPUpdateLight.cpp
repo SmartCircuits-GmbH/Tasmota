@@ -336,6 +336,14 @@ HTTPUpdateResult HTTPUpdateLight::handleUpdate(HTTPClientLight& http, const Stri
                     }
 */
 
+                    // peek() does not block: over TLS the first body record may not be
+                    // decrypted yet right after GET() (headers and body arrive in separate
+                    // records, e.g. from CloudFront). Wait up to 5 s for body data first.
+                    uint32_t peek_start = millis();
+                    while ((tcp->available() <= 0) && tcp->connected() && ((millis() - peek_start) < 5000)) {
+                        delay(1);
+                    }
+
                     // check for valid first magic byte
 //                    if(buf[0] != 0xE9) {
                     if(tcp->peek() != 0xE9) {

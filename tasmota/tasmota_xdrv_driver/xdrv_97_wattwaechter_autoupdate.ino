@@ -48,11 +48,19 @@ static void wwAuLoadFromNvs(void) {
     NvmLoad("ww_au", "en",   &wwAu.enabled,  sizeof(wwAu.enabled));
     NvmLoad("ww_au", "last", &wwAu.last_utc, sizeof(wwAu.last_utc));
   }
-  // Stagger update window across the fleet using base MAC.
+  // Stagger update window across the fleet: one of 180 minutes (03:00-05:59)
+  // derived from the device-specific MAC bytes. Hash them (FNV-1a) because
+  // Espressif base MACs are allocated in blocks of 4 (mac[5] % 4 == 0), so
+  // plain modulo on the raw bytes would only hit a fraction of the slots.
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_BASE);
-  wwAu.hour   = 3 + (mac[5] % 3);   // 3, 4 or 5
-  wwAu.minute = mac[5] % 60;
+  uint32_t h = 2166136261UL;
+  for (uint32_t i = 3; i < 6; i++) {
+    h = (h ^ mac[i]) * 16777619UL;
+  }
+  uint32_t slot = h % 180;
+  wwAu.hour   = 3 + (slot / 60);    // 3, 4 or 5
+  wwAu.minute = slot % 60;
 }
 
 static void wwAuSaveEnabled(void) {
