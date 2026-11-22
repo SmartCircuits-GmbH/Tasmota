@@ -50,6 +50,12 @@
 // Return to app0 if the network is up but no OTA was started within this time.
 #define WWSBF_IDLE_S    300
 
+// Safeboot revision marker, found by the app (xdrv_97) by scanning the
+// safeboot partition. Logged at init so the linker keeps it.
+#define WWSBF_STR2(x)  #x
+#define WWSBF_STR(x)   WWSBF_STR2(x)
+static const char wwSbfRev[] = "WWSBREV=" WWSBF_STR(WW_SAFEBOOT_REV);
+
 static struct {
   bool     had_ota;            // an OTA attempt has been observed
   bool     fallback_armed;     // grace timer is running
@@ -78,6 +84,10 @@ static void wwSbfBootApp0(const char* reason) {
 
 bool Xdrv96(uint32_t function) {
   switch (function) {
+    case FUNC_INIT:
+      AddLog(LOG_LEVEL_INFO, PSTR("SBF: %s"), wwSbfRev);
+      break;
+
     case FUNC_EVERY_SECOND:
       // OTA running? remember and reset any pending fallback.
       if (TasmotaGlobal.ota_state_flag > 0) {

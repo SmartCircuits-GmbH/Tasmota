@@ -66,6 +66,14 @@
   // ESP32-C6: HTTPS via AWS-CDN
   #undef  OTA_URL
   #define OTA_URL "https://download.xn--wattwchter-u5a.de/firmware/ww_wifi_usb_esp32/latest/firmware.bin"
+
+  // Safeboot revision. Embedded as "WWSBREV=nnn" in the safeboot image
+  // (xdrv_96). The app (xdrv_97) scans the safeboot partition for it and
+  // replaces an older safeboot via `Upgrade 2` from <OtaUrl dir>/firmware-safeboot.bin.
+  // Bump on every safeboot change that fielded devices must get, and upload
+  // the matching firmware-safeboot.bin BEFORE releasing the app.
+  //   1 = 2026-11-22: TLS peek wait (HTTPUpdateLight), idle return to app0
+  #define WW_SAFEBOOT_REV  1
 #endif
 
 // ============================================================================
