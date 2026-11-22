@@ -1505,6 +1505,14 @@ void Every250mSeconds(void)
             httpUpdateLight.rebootOnUpdate(false);
             httpUpdateLight.setFactory(TasmotaGlobal.ota_factory);
             ota_result = (HTTP_UPDATE_FAILED != httpUpdateLight.update(OTAclient, version));
+#ifdef WATTWAECHTER_ESP32C6
+            // Upgrade 2 (safeboot self-update) leaves the new safeboot as boot
+            // partition. Nothing to do there, so keep booting the running app.
+            if (ota_result && TasmotaGlobal.ota_factory) {
+              esp_err_t err = esp_ota_set_boot_partition(esp_ota_get_running_partition());
+              AddLog(LOG_LEVEL_INFO, PSTR("OTA: Safeboot updated, boot partition back to app (%d)"), err);
+            }
+#endif  // WATTWAECHTER_ESP32C6
           }
 #else // standard OTA over HTTP
           WiFiClient OTAclient;

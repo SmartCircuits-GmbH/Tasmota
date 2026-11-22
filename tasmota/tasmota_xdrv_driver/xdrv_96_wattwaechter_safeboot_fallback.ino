@@ -22,6 +22,14 @@
   network since boot, the driver also returns to app0 (not while the
   Wi-Fi manager AP is active, the user may be configuring it).
 
+  The safeboot can also be entered without any OTA request: `Upgrade 2`
+  (safeboot self-update from the app) makes the new safeboot the boot
+  partition, and `Restart 3` / the web UI switch to it on purpose. If the
+  network is up but no OTA was started, the driver returns to app0 after
+  WWSBF_IDLE_S. The timer starts when the network comes up (a requested
+  OTA starts right then) and is held while a web upload is in progress or
+  the Wi-Fi manager AP is active, so a manual upload still has time.
+
   A single short press of the button (Button1) while no OTA is running
   also returns to app0 immediately. Longer holds (factory reset) and
   multi-presses (e.g. 5x Wi-Fi reset) keep their standard behaviour.
@@ -39,6 +47,8 @@
 // Return to app0 if the network has not come up at all within this time.
 // Generous enough for a router that boots slower after a power outage.
 #define WWSBF_NO_NET_S  300
+// Return to app0 if the network is up but no OTA was started within this time.
+#define WWSBF_IDLE_S    300
 
 static struct {
   bool     had_ota;            // an OTA attempt has been observed
@@ -46,6 +56,8 @@ static struct {
   uint32_t fallback_at;        // millis() when fallback should trigger
   bool     net_seen;           // network was up at least once this boot
   bool     no_net_done;        // no-network fallback already attempted
+  uint32_t idle_since;         // uptime when the idle timer (re)started
+  bool     idle_done;          // idle fallback already attempted
 } wwSbf;
 
 static void wwSbfBootApp0(const char* reason) {
@@ -82,14 +94,31 @@ bool Xdrv96(uint32_t function) {
 
       // Network never came up -> the OTA can't even start. Don't stay in
       // safeboot forever. Attempted once; a broken app0 keeps us here.
-      if (!TasmotaGlobal.global_state.network_down) {
+      if (!TasmotaGlobal.global_state.network_down && !wwSbf.net_seen) {
         wwSbf.net_seen = true;
+        wwSbf.idle_since = TasmotaGlobal.uptime;
       }
       if (!wwSbf.had_ota && !wwSbf.net_seen && !wwSbf.no_net_done &&
           !WifiIsInManagerMode() && (TasmotaGlobal.uptime >= WWSBF_NO_NET_S)) {
         wwSbf.no_net_done = true;
         wwSbfBootApp0(PSTR("No network"));
         break;
+      }
+
+      // Network up but no OTA requested (Upgrade 2, Restart 3, web UI)?
+      // Don't stay in safeboot forever. Hold while the user is uploading.
+      if (!wwSbf.had_ota && wwSbf.net_seen && !wwSbf.idle_done) {
+        bool busy = WifiIsInManagerMode();
+#ifdef USE_WEBSERVER
+        busy |= (Web.upload_file_type != UPL_NONE);
+#endif  // USE_WEBSERVER
+        if (busy) {
+          wwSbf.idle_since = TasmotaGlobal.uptime;
+        } else if ((TasmotaGlobal.uptime - wwSbf.idle_since) >= WWSBF_IDLE_S) {
+          wwSbf.idle_done = true;
+          wwSbfBootApp0(PSTR("No OTA requested"));
+          break;
+        }
       }
 
       // OTA was attempted earlier this boot, has finished and didn't
