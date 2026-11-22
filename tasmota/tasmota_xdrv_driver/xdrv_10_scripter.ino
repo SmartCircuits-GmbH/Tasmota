@@ -906,7 +906,128 @@ int32_t play_wave(char *path);
 char *exfile(char *lp, TS_FLOAT *error);
 
 #ifdef USE_SCRIPT_MDNS
+#ifdef WATTWAECHTER_ESP32C6
+// WattWaechter: the Shelly emulation must not replace the device's own mDNS
+// host and _http entry (the WattWaechter app finds the device by them). With
+// Tasmota mDNS running, the Shelly name becomes an extra (delegated) host with
+// its own _http and _<type> instances on the same IP. Without it (SetOption55 0)
+// the Shelly name becomes the hostname, as upstream does. Registration waits
+// for the network, so mdns() also works from >B, and follows IP changes.
+static struct {
+  bool     pending;    // registration waits for the network
+  bool     mac_auto;   // append the MAC once the network is up
+  bool     delegated;  // Shelly name runs as a delegated host
+  bool     own;        // Shelly name runs as our hostname (no Tasmota mDNS)
+  uint32_t ip;         // address announced for the delegated host
+  char     host[26];   // delegated host currently registered
+} wwSmd;
+
+static void wwScriptMdnsRegister(uint32_t ip) {
+  SCRIPT_MDNS &m = glob_script_mem.mdns;
+  if (wwSmd.mac_auto) {
+    wwSmd.mac_auto = false;
+    uint8_t mc[6];
+    WiFi.macAddress(mc);
+    char s[13];
+    snprintf_P(s, sizeof(s), PSTR("%02x%02x%02x%02x%02x%02x"), mc[0], mc[1], mc[2], mc[3], mc[4], mc[5]);
+    strlcat(m.shelly_name, s, sizeof(m.shelly_name));
+  }
+  if (wwSmd.delegated) {           // script restarted: drop the old host and its services
+    mdns_delegate_hostname_remove(wwSmd.host);
+    wwSmd.delegated = false;
+  }
+
+  mdns_txt_item_t txt[4];
+  size_t n;
+  if (!strcmp(m.type, "everhome")) {
+    txt[0] = { "name", m.shelly_name };
+    txt[1] = { "id", m.shelly_name };
+    n = 2;
+  } else {
+    txt[0] = { "fw_id", m.shelly_fw_id };
+    txt[1] = { "arch", "esp8266" };
+    txt[2] = { "id", m.shelly_name };
+    txt[3] = { "gen", m.shelly_gen };
+    n = 4;
+  }
+  char stype[sizeof(m.type) + 1];
+  snprintf_P(stype, sizeof(stype), PSTR("_%s"), m.type);
+
+  const char *host = nullptr;      // nullptr = our own hostname
+  bool add_http = true;
+  if (Mdns.begun && strcasecmp(m.shelly_name, TasmotaGlobal.hostname)) {
+    mdns_ip_addr_t addr = {};
+    addr.addr.type = ESP_IPADDR_TYPE_V4;
+    addr.addr.u_addr.ip4.addr = ip;
+    esp_err_t err = mdns_delegate_hostname_add(m.shelly_name, &addr);
+    if (err != ESP_OK) {
+      AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UPNP "SCR: mDNS host %s failed: %d"), m.shelly_name, err);
+      return;
+    }
+    wwSmd.delegated = true;
+    wwSmd.ip = ip;
+    strlcpy(wwSmd.host, m.shelly_name, sizeof(wwSmd.host));
+    host = wwSmd.host;
+  } else if (Mdns.begun) {
+    add_http = false;              // same name as Tasmota: its _http entry stays
+  } else {
+    if (wwSmd.own) {
+      mdns_service_remove_all();   // only our own services exist without Tasmota mDNS
+      mdns_hostname_set(m.shelly_name);
+    } else if (!MDNS.begin(m.shelly_name)) {
+      AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UPNP "SCR: Error setting up MDNS responder!"));
+      return;
+    }
+    wwSmd.own = true;
+  }
+  if (add_http) {
+    mdns_service_add_for_host(m.shelly_name, "_http", "_tcp", host, 80, txt, n);
+  }
+  mdns_service_add_for_host(m.shelly_name, stype, "_tcp", host, 80, txt, n);
+  AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UPNP "SCR: mDNS %s service %s as %s.local"),
+         (host) ? PSTR("added") : PSTR("started"), stype, m.shelly_name);
+}
+
+// Called every second: registers once the network is up, follows IP changes.
+static void wwScriptMdnsEverySecond(void) {
+  if (!wwSmd.pending && !wwSmd.delegated) { return; }
+  if (TasmotaGlobal.global_state.network_down) { return; }
+  uint32_t ip = (uint32_t)WiFi.localIP();
+  if (!ip) { return; }
+  if (wwSmd.pending) {
+    wwSmd.pending = false;
+    wwScriptMdnsRegister(ip);
+  } else if (ip != wwSmd.ip) {
+    mdns_ip_addr_t addr = {};
+    addr.addr.type = ESP_IPADDR_TYPE_V4;
+    addr.addr.u_addr.ip4.addr = ip;
+    if (ESP_OK == mdns_delegate_hostname_set_address(wwSmd.host, &addr)) {
+      wwSmd.ip = ip;
+      AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UPNP "SCR: mDNS host %s moved to %_I"), wwSmd.host, ip);
+    }
+  }
+}
+#endif  // WATTWAECHTER_ESP32C6
+
 int32_t script_mdns(char *name, char *mac, char *xtype) {
+#ifdef WATTWAECHTER_ESP32C6
+  SCRIPT_MDNS &m = glob_script_mem.mdns;
+  strlcpy(m.type, xtype, sizeof(m.type));
+  wwSmd.mac_auto = false;
+  if ('-' == *name) {
+    strlcpy(m.shelly_name, TasmotaGlobal.hostname, sizeof(m.shelly_name));
+  } else {
+    strlcpy(m.shelly_name, name, sizeof(m.shelly_name));
+    if ('-' == *mac) {
+      wwSmd.mac_auto = true;       // MAC is only reliable once Wi-Fi runs
+    } else {
+      strlcat(m.shelly_name, mac, sizeof(m.shelly_name));
+    }
+  }
+  wwSmd.pending = true;
+  wwScriptMdnsEverySecond();       // registers right away if the network is up
+  return 0;
+#else
 
   strcpy(glob_script_mem.mdns.type, xtype);
   char shelly_mac[13];
@@ -990,6 +1111,7 @@ int32_t script_mdns(char *name, char *mac, char *xtype) {
 #endif
   AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UPNP "SCR: mDNS started with service tcp and %s. Hostname: %s"), glob_script_mem.mdns.type, glob_script_mem.mdns.shelly_name);
   return 0;
+#endif  // WATTWAECHTER_ESP32C6
 }
 #endif // USE_SCRIPT_MDNS
 
@@ -14860,6 +14982,9 @@ bool Xdrv10(uint32_t function) {
 
     case FUNC_EVERY_SECOND:
       ScriptEverySecond();
+#if defined(USE_SCRIPT_MDNS) && defined(WATTWAECHTER_ESP32C6)
+      wwScriptMdnsEverySecond();
+#endif
       break;
     case FUNC_COMMAND:
       result = ScriptCommand();
