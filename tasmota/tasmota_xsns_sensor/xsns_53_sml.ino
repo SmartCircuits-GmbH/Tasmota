@@ -2123,13 +2123,18 @@ void sml_shift_in(uint32_t meters, uint32_t shard) {
           if (calculated_crc == extracted_crc) {
             cp->crcfinecnt++;
             //AddLog(LOG_LEVEL_INFO, PSTR("SML: CRC ok"));
-            if (len > mp->sbsiz) {
-              len = mp->sbsiz;
-            }
-            for (uint16_t i=8; i<=cp->teleendpos - 8 - mp->sbsiz; i++) {
+            // Feed every entry up to the end sequence (1B 1B 1B 1B 1A at teleendpos-7)
+            // to the decoder. The old bound (teleendpos - 8 - sbsiz) stopped 56 bytes
+            // before the end, so the last entry of the telegram was never decoded --
+            // on Iskra MT631/MT681 that is 16.7.0, i.e. "Power" never appeared.
+            // Entries closer to the end than sbsiz get a short copy, zero-padded.
+            uint16_t dend = cp->teleendpos - 7;
+            for (uint16_t i = 8; i < dend; i++) {
               if (cp->crcbuff[i] == SML_SYNC || ((mp->flag & NO_SYNC_FLG) != 0)) {
-                if (i+len > cp->teleendpos) len--;
-                memcpy(mp->sbuff, &cp->crcbuff[i],len);
+                uint16_t n = dend - i;
+                if (n > mp->sbsiz) n = mp->sbsiz;
+                memcpy(mp->sbuff, &cp->crcbuff[i], n);
+                if (n < mp->sbsiz) memset(mp->sbuff + n, 0, mp->sbsiz - n);
                 SML_Decode(meters);
               }
             }
