@@ -20,6 +20,9 @@
   retried in the next night; after success the device reboots into the app
   and the scan finds the new rev.
 
+  mDNS: with USE_DISCOVERY, SetOption55 is switched on once at boot (NVS
+  "ww_au"/"mdns"), so fielded devices become discoverable by the app.
+
   Console:
     AutoUpdate         - show current state, update window, last run
     AutoUpdate 0       - disable
@@ -134,6 +137,20 @@ static void wwAuLoadFromNvs(void) {
     NvmLoad("ww_au", "en",   &wwAu.enabled,  sizeof(wwAu.enabled));
     NvmLoad("ww_au", "last", &wwAu.last_utc, sizeof(wwAu.last_utc));
   }
+#ifdef USE_DISCOVERY
+  // Fielded devices keep SetOption55 0 from their old settings. Switch mDNS
+  // on once so the app can find them; a later SetOption55 0 by the user stays.
+  uint8_t mdns_done = 0;
+  NvmLoad("ww_au", "mdns", &mdns_done, sizeof(mdns_done));
+  if (!mdns_done) {
+    if (!Settings->flag3.mdns_enabled) {
+      Settings->flag3.mdns_enabled = 1;
+      AddLog(LOG_LEVEL_INFO, PSTR("AU: mDNS enabled (SetOption55 1)"));
+    }
+    mdns_done = 1;
+    NvmSave("ww_au", "mdns", &mdns_done, sizeof(mdns_done));
+  }
+#endif  // USE_DISCOVERY
   // Stagger update window across the fleet: one of 180 minutes (03:00-05:59)
   // derived from the device-specific MAC bytes. Hash them (FNV-1a) because
   // Espressif base MACs are allocated in blocks of 4 (mac[5] % 4 == 0), so

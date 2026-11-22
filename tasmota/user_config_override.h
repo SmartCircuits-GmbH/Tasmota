@@ -296,6 +296,13 @@
   // mDNS für Shelly Pro 3EM Emulation (z.B. für smarte Akkus)
   #define USE_SCRIPT_MDNS
 
+  // mDNS-Discovery: Gerät meldet sich als <Hostname>.local mit _http._tcp,
+  // damit die WattWächter-App es findet. SetOption55 ab Werk an; Geräte aus
+  // dem Feld schaltet xdrv_97 einmalig ein (NVS ww_au/mdns).
+  #define USE_DISCOVERY
+  #undef  MDNS_ENABLED
+  #define MDNS_ENABLED           true
+
 #endif // WATTWAECHTER_ESP32C6
 
 #endif // WATTWAECHTER_WIFI_USB || WATTWAECHTER_ESP32C6
